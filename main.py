@@ -24,48 +24,49 @@ def negative_image(image):
   """
   return 255 - image
 
+def gamma_correction(image, gamma=1.0):
+    # normalize image to range 0-1
+    image_normalized = image / 255.0
 
-def gamma_correction(image, gamma):
-  """Applies gamma correction to an image.
+    # apply gamma correction formula
+    image_corrected = 255.0 * np.power(image_normalized, 1.0/gamma)
 
-  Args:
-      image: A NumPy array representing the image (RGB or grayscale).
-      gamma: The gamma value (float).
+    # clip values that exceed the valid range due to numerical errors
+    image_corrected = np.clip(image_corrected, 0, 255)
 
-  Returns:
-      A NumPy array representing the gamma-corrected image.
-  """
-  if gamma == 0:
-    gamma = 0.0000000001
-  inv_gamma = 1.0 / gamma
-  return np.power(image / 255.0, inv_gamma) * 255.0
+    # convert image back to uint8 data type
+    image_corrected = image_corrected.astype(np.uint8)
 
-def logarithmic_transformation(image, c):
-  """Applies logarithmic transformation to an image.
+    return image_corrected
 
-  Args:
-      image: A NumPy array representing the image (RGB or grayscale).
-      c: A constant factor (float).
 
-  Returns:
-      A NumPy array representing the log-transformed image.
-  """
-  return c * np.log(1 + image / 255.0) * 255.0
 
-def contrast_stretching(image, low_value, high_value):
-  """Stretches the contrast of an image.
+def logarithmic_transformation(image, c=1):
+    # apply logarithmic transformation formula
+    image_transformed = c * np.log(np.where(image == 0, 1e-10, image) + 1) / np.log(256)
 
-  Args:
-      image: A NumPy array representing the image (RGB or grayscale).
-      low_value: The minimum intensity value for stretching (int).
-      high_value: The maximum intensity value for stretching (int).
+    # clip values that exceed the valid range due to numerical errors
+    image_transformed = np.clip(image_transformed, 0, 255)
 
-  Returns:
-      A NumPy array representing the contrast-stretched image.
-  """
-  min_val, max_val = np.min(image), np.max(image)
-  scale = (high_value - low_value) / (max_val - min_val)
-  return low_value + scale * (image - min_val)
+    # convert image back to uint8 data type
+    image_transformed = image_transformed.astype(np.uint8)
+
+    return image_transformed
+
+
+def contrast_stretching(image, low=0, high=255):
+  old_min = np.min(image)
+  old_max = np.max(image)
+  
+  # Handle case where min and max are the same (avoid division by zero)
+  if old_min == old_max:
+    return image.copy()
+  
+  # Clip low intensity values to low
+  clipped_image = np.clip(image, low, high)
+  
+  return ((clipped_image - old_min) * (high - low) / (old_max - old_min)) + low
+
 
 
 
@@ -86,44 +87,36 @@ def histogram_equalization(image):
         equalized_image = cv2.merge((b_eq, g_eq, r_eq))
     else:
         return image
-        raise ValueError("Input image must be grayscale or RGB color image.")
-
     return equalized_image
 
 
 
 def intensity_level_slicing(image, low_threshold, high_threshold):
-  """Slices an image based on intensity levels.
-
-  Args:
-      image: A NumPy array representing the image (RGB or grayscale).
-      low_threshold: The lower threshold for slicing (int).
-      high_threshold: The upper threshold for slicing (int).
-
-  Returns:
-      A NumPy array representing the intensity-level sliced image.
-  """
-  if high_threshold < low_threshold:
-    low_threshold,high_threshold = high_threshold,low_threshold
     
-  mask = np.zeros(image.shape, dtype=np.uint8)
-  mask[low_threshold:high_threshold + 1] = 255
-  return cv2.bitwise_and(image, mask)
+    image = convert_to_grayscale(image)
+    row, column = image.shape
+    # Create an zeros array to store the sliced image
+    img1 = np.zeros((row,column),dtype = 'uint8')
 
-def bit_plane_slicing(image, n):
-  """Extracts a specific bit plane from an image.
 
-  Args:
-      image: A NumPy array representing the image.
-      n: The bit plane index (0-based, int).
+    # Loop over the input image and if pixel value lies in desired range set it to 255 otherwise set it to 0.
+    for i in range(row):
+        for j in range(column):
+            if image[i,j]>low_threshold and image[i,j]< high_threshold:
+                img1[i,j] = 255
+            else:
+                img1[i,j] = 0
+                
+    return img1
+        
 
-  Returns:
-      A NumPy array representing the extracted bit plane (grayscale).
-  """
-  if len(image.shape) == 3:
-    image  = convert_to_grayscale(image)
+
+def bit_plane_slicing(image, plane_number):
+    if len(image.shape) == 3:
+        image  = convert_to_grayscale(image)
     
-  return (image & (1 << n)) >> n
+    return (image >> plane_number) & 1 
+
 
 
 def load_image(file_path):
@@ -135,11 +128,11 @@ def load_image(file_path):
 class Main:
     def __init__(self):
         self.image  = None
-        self.log = 0
+        self.log = 1
         self.bit_pln= 0
         self.int_level_sl_l = 0
         self.int_level_sl_h = 255
-        self.gm = 0
+        self.gm = 0.1
         self.cnt_str_l = 0
         self.cnt_str_h = 255
         
@@ -222,36 +215,36 @@ class Main:
 
 
         gm_crr_axes = axes[0, 2]
-        if self.image: gm_crr_axes.imshow(gamma_correction(self.image,1))
+        if self.image: gm_crr_axes.imshow(gamma_correction(self.image,self.gm))
         gm_crr_axes.axis('off')
         gm_crr_axes.set_title('Gamma Correction')
 
         slider_ax = fig.add_axes([gm_crr_axes.get_position().x0, gm_crr_axes.get_position().y0 - 0.04, gm_crr_axes.get_position().width, 0.02])
-        slider = widgets.Slider(slider_ax, 'gm', 0.0, 10.0, valinit=0.0)
+        slider = widgets.Slider(slider_ax, 'gm', 0.1, 10.0, valinit=self.gm)
         slider.on_changed(lambda val, gm_crr_axes=gm_crr_axes,type='gamma': update(val, gm_crr_axes,type))
 
 
         log_tr_axes = axes[0, 3]
-        if self.image: log_tr_axes.imshow(logarithmic_transformation(self.image,0))
+        if self.image: log_tr_axes.imshow(logarithmic_transformation(self.image,self.log))
         log_tr_axes.axis('off')
         log_tr_axes.set_title('Logarithmic Transformation')
 
         slider_ax_lg = fig.add_axes([log_tr_axes.get_position().x0 + 0.05, log_tr_axes.get_position().y0 - 0.04, log_tr_axes.get_position().width, 0.02])
-        slider_lg = widgets.Slider(slider_ax_lg, 'c', -10.0, 10.0, valinit=0.0)
+        slider_lg = widgets.Slider(slider_ax_lg, 'c', 0, 255, valinit=self.log)
         slider_lg.on_changed(lambda val, log_tr_axes=log_tr_axes,type='log': update(val, log_tr_axes,type))
 
 
 
         cnt_str_axes = axes[1, 0]
-        if self.image: cnt_str_axes.imshow(contrast_stretching(self.image,0,255))
+        if self.image: cnt_str_axes.imshow(contrast_stretching(self.image,self.cnt_str_l,self.cnt_str_h))
         cnt_str_axes.axis('off')
         cnt_str_axes.set_title('Contrast Stretching')
         slider_ax_cl = fig.add_axes([cnt_str_axes.get_position().x0 - 0.08, cnt_str_axes.get_position().y0 - 0.08, cnt_str_axes.get_position().width, 0.02])
-        slider_cl = widgets.Slider(slider_ax_cl, 'l', 0, 255, valinit=0,valstep=1)
+        slider_cl = widgets.Slider(slider_ax_cl, 'l', 0, 255, valinit=self.cnt_str_l,valstep=1)
         slider_cl.on_changed(lambda val, cnt_str_axes=cnt_str_axes,type='cont_stretch_l': update(val, cnt_str_axes,type))
 
         slider_ax_ch = fig.add_axes([cnt_str_axes.get_position().x0 - 0.08, cnt_str_axes.get_position().y0 - 0.11, cnt_str_axes.get_position().width, 0.02])
-        slider_ch = widgets.Slider(slider_ax_ch, 'h', 0, 255, valinit=255,valstep=1)
+        slider_ch = widgets.Slider(slider_ax_ch, 'h', 0, 255, valinit=self.cnt_str_h,valstep=1)
         slider_ch.on_changed(lambda val, cnt_str_axes=cnt_str_axes,type='cont_stretch_h': update(val, cnt_str_axes,type))
 
         histogram_equalization_axes = axes[1, 1]
@@ -266,11 +259,11 @@ class Main:
         int_lc_axes.set_title('Intensity Level Slicing')
 
         slider_ax_it_l = fig.add_axes([int_lc_axes.get_position().x0, int_lc_axes.get_position().y0 - 0.08, int_lc_axes.get_position().width, 0.02])
-        slider_it_l = widgets.Slider(slider_ax_it_l, 'l', 0, 255, valinit=0,valstep=1)
+        slider_it_l = widgets.Slider(slider_ax_it_l, 'l', 0, 255, valinit=self.int_level_sl_l,valstep=1)
         slider_it_l.on_changed(lambda val, int_lc_axes=int_lc_axes,type='intensity_l': update(val, int_lc_axes,type))
 
         slider_ax_it_h = fig.add_axes([int_lc_axes.get_position().x0 - 0., int_lc_axes.get_position().y0 - 0.11, int_lc_axes.get_position().width, 0.02])
-        slider_it_h = widgets.Slider(slider_ax_it_h, 'h', 0, 255, valinit=255,valstep=1)
+        slider_it_h = widgets.Slider(slider_ax_it_h, 'h', 0, 255, valinit=self.int_level_sl_h,valstep=1)
         slider_it_h.on_changed(lambda val, int_lc_axes=int_lc_axes,type='intensity_h': update(val, int_lc_axes,type))
 
         bp_slc_axes = axes[1, 3]
@@ -278,7 +271,7 @@ class Main:
         bp_slc_axes.axis('off')
         bp_slc_axes.set_title('Bit Plane Slicing')
         slider_ax_bp = fig.add_axes([bp_slc_axes.get_position().x0 + 0.05, bp_slc_axes.get_position().y0 - 0.08, bp_slc_axes.get_position().width, 0.02])
-        slider_bp = widgets.Slider(slider_ax_bp, 'n', 0, 8, valinit=0.0,valstep=1)
+        slider_bp = widgets.Slider(slider_ax_bp, 'n', 0, 8, valinit=self.bit_pln,valstep=1)
         slider_bp.on_changed(lambda val, bp_slc_axes=bp_slc_axes,type='bit_plane': update(val, bp_slc_axes,type))
 
             
